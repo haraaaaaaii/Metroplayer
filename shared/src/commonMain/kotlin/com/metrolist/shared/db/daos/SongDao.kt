@@ -297,7 +297,22 @@ interface SongDao {
     suspend fun upsertSongArtists(maps: List<SongArtistMap>)
 
     @Upsert
+    suspend fun upsertSongAlbums(maps: List<SongAlbumMap>)
+
+    @Upsert
     suspend fun upsertAlbumArtists(maps: List<AlbumArtistMap>)
+
+    @Query("DELETE FROM song_artist_map WHERE songId IN (:songIds)")
+    suspend fun deleteSongArtistMappings(songIds: List<String>)
+
+    @Query("DELETE FROM song_album_map WHERE songId IN (:songIds)")
+    suspend fun deleteSongAlbumMappings(songIds: List<String>)
+
+    @Query("SELECT id FROM song WHERE isLocal = 1 AND id LIKE 'content://media/external/audio/media/%'")
+    suspend fun mediaStoreSongIds(): List<String>
+
+    @Query("DELETE FROM song WHERE id IN (:songIds)")
+    suspend fun deleteMediaStoreSongs(songIds: List<String>)
 
     @Transaction
     @Query("SELECT * FROM song_artist_map WHERE songId = :songId")
@@ -488,6 +503,7 @@ interface SongDao {
         """
         SELECT song.* FROM song
         WHERE song.inLibrary IS NOT NULL
+          AND (:localOnly = 0 OR song.isLocal = 1)
           AND (
               song.title LIKE '%' || :query || '%'
               OR song.customTitle LIKE '%' || :query || '%'
@@ -510,6 +526,7 @@ interface SongDao {
         limit: Int,
         offset: Int,
         descending: Boolean,
+        localOnly: Boolean,
     ): List<Song>
 
     fun downloadedSongs(

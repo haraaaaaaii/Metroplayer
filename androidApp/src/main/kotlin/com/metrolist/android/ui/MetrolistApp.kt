@@ -2,13 +2,11 @@
 
 package com.metrolist.android.ui
 
-import android.app.SearchManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.nfc.NfcAdapter
 import android.os.Build
-import android.provider.MediaStore
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.core.animateFloatAsState
@@ -175,8 +173,6 @@ import com.metrolist.android.playback.PlaybackSnackbarEvents
 import com.metrolist.android.playback.PlayerConnection
 import com.metrolist.android.playback.SongDownloadManager
 import com.metrolist.android.playback.isRunnable
-import com.metrolist.android.playback.resolveIncomingPlaybackSong
-import com.metrolist.android.playback.voiceSearchRequest
 import com.metrolist.android.ui.component.BottomSheetMenu
 import com.metrolist.android.ui.component.FloatingTopAppBar
 import com.metrolist.android.ui.component.LocalMenuState
@@ -184,7 +180,6 @@ import com.metrolist.android.ui.component.MenuState
 import com.metrolist.android.ui.component.TabTopBarHeight
 import com.metrolist.android.ui.component.TopBarIconButton
 import com.metrolist.android.ui.component.floatingBarCircle
-import com.metrolist.android.ui.components.AccountMenu
 import com.metrolist.android.ui.components.DesktopCaptionBar
 import com.metrolist.android.ui.components.DesktopMiniPlayerHeight
 import com.metrolist.android.ui.components.MiniPlayer
@@ -201,16 +196,13 @@ import com.metrolist.android.ui.screens.AutoPlaylistScreen
 import com.metrolist.android.ui.screens.BrowseScreen
 import com.metrolist.android.ui.screens.DownloadsScreen
 import com.metrolist.android.ui.screens.HistoryScreen
-import com.metrolist.android.ui.screens.HomeScreen
 import com.metrolist.android.ui.screens.HomeSectionScreen
 import com.metrolist.android.ui.screens.IntegrationsScreen
 import com.metrolist.android.ui.screens.LibraryScreen
-import com.metrolist.android.ui.screens.LoginScreen
 import com.metrolist.android.ui.screens.PlaylistScreen
 import com.metrolist.android.ui.screens.PodcastScreen
 import com.metrolist.android.ui.screens.RecognitionHistoryScreen
 import com.metrolist.android.ui.screens.RecognitionScreen
-import com.metrolist.android.ui.screens.SearchScreen
 import com.metrolist.android.ui.screens.SettingsScreen
 import com.metrolist.android.ui.screens.settings.AndroidAboutScreen
 import com.metrolist.android.ui.screens.settings.AndroidAutoScreen
@@ -241,14 +233,12 @@ import com.metrolist.android.utils.startActivitySafely
 import com.metrolist.android.viewmodels.LibraryViewModel
 import com.metrolist.android.viewmodels.PlaybackViewModel
 import com.metrolist.android.widget.PlaylistWidgetReceiver
-import com.metrolist.innertubex.utils.YouTubeUrlParser
-import com.metrolist.shared.auth.AuthManager
-import com.metrolist.shared.auth.YouTubeSessionState
 import com.metrolist.shared.constants.MiniPlayerHeight
 import com.metrolist.shared.constants.ModernMiniPlayerBottomSpacing
 import com.metrolist.shared.constants.WideNavigationRailCollapsedWidth
 import com.metrolist.shared.constants.modernMiniPlayerHeight
 import com.metrolist.shared.db.MusicDatabase
+import com.metrolist.shared.db.entities.toSongItem
 import com.metrolist.shared.db.entities.KIND_DOWNLOAD
 import com.metrolist.shared.db.isHistoryPlaylistId
 import com.metrolist.shared.deviceconnect.DeviceConnectPairingHost
@@ -290,7 +280,6 @@ import com.metrolist.shared.generated.resources.youtube_session_expired_title
 import com.metrolist.shared.listentogether.parseListenTogetherInvitation
 import com.metrolist.shared.model.ArtistTiny
 import com.metrolist.shared.model.BuiltinPlaylist
-import com.metrolist.shared.model.SearchFilter
 import com.metrolist.shared.model.SongItem
 import com.metrolist.shared.playback.LocalPlayerSession
 import com.metrolist.shared.playlistimport.PlaylistImportProgressCard
@@ -298,14 +287,10 @@ import com.metrolist.shared.playlistimport.PlaylistImportStatusManager
 import com.metrolist.shared.settings.MiniPlayerType
 import com.metrolist.shared.settings.Settings
 import com.metrolist.shared.settings.defaultOpenTabRoot
-import com.metrolist.shared.settings.defaultOpenTabScreen
-import com.metrolist.shared.state.GlobalYouTube
-import com.metrolist.shared.state.GlobalYouTubeRepository
 import com.metrolist.shared.state.UploadNotificationState
 import com.metrolist.shared.state.applyContentRegion
 import com.metrolist.shared.ui.LocalIsInPipMode
 import com.metrolist.shared.ui.LocalIsTv
-import com.metrolist.shared.ui.TokenLoginScreen
 import com.metrolist.shared.ui.YouTubeSyncSnackbar
 import com.metrolist.shared.ui.components.AlertDialog
 import com.metrolist.shared.ui.components.BottomSheet
@@ -361,9 +346,6 @@ import com.metrolist.shared.ui.tv.tvFocusHighlight
 import com.metrolist.shared.ui.utils.LocalMouseScrollFactors
 import com.metrolist.shared.utils.BlockScreenshots
 import com.metrolist.shared.utils.extractListenTogetherRoomCode
-import com.metrolist.shared.utils.parseYouTubePodcastId
-import com.metrolist.shared.utils.parseYouTubeStartPositionMs
-import com.metrolist.shared.utils.parseYouTubeUrl
 import com.metrolist.shared.viewmodels.PlayerViewModel
 import com.metrolist.shared.youtube.playback.PlaybackNetworkStateStore
 import kotlinx.coroutines.CoroutineScope
@@ -393,7 +375,6 @@ private const val NAVIGATION_ROUTE_METADATA_KEY = "metrolist:route"
 fun MetrolistApp(
     navigationSaveKey: String,
     incomingIntent: Intent? = null,
-    incomingPlaybackSong: Deferred<SongItem>? = null,
     onExitApp: () -> Unit = {},
     onIncomingIntentConsumed: (Intent) -> Unit = {},
 ) {
@@ -402,7 +383,6 @@ fun MetrolistApp(
     val directionToNavigationRail = if (LocalLayoutDirection.current == LayoutDirection.Ltr) FocusDirection.Left else FocusDirection.Right
     val stopPlaybackLabel = stringResource(Res.string.menu_stop)
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val authManager = remember { AuthManager() }
     val playbackNetworkState by PlaybackNetworkStateStore.state.collectAsState()
     LifecycleStartEffect(Unit) {
         App.instance.playbackNetworkMonitor.refresh()
@@ -417,28 +397,9 @@ fun MetrolistApp(
     val pureBlack = Settings.shared.isPureBlackTheme(darkTheme)
 
     val coroutineScope = rememberCoroutineScope()
-    LaunchedEffect(authManager) {
-        authManager.restorePersistedSession()
-        authManager.restoreSession()
-    }
-
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            runCatching { UploadNotificationState.refreshOnAppOpen(GlobalYouTubeRepository.instance) }
-        }
-    }
-
-    val systemJvmLocale = AppLocale.systemLocale(context)
-
-    GlobalYouTube.applyContentRegion(
-        contentCountry = Settings.shared.contentCountry,
-        contentLanguage = Settings.shared.contentLanguage,
-        systemLocale = systemJvmLocale,
-    )
-
     val playbackViewModel: PlaybackViewModel = koinViewModel()
     val libraryViewModel: LibraryViewModel = koinViewModel()
-    LaunchedEffect(Settings.shared.dataSyncId, Settings.shared.accountEmail, Settings.shared.innerTubeAuthUser) {
+    LaunchedEffect(libraryViewModel) {
         libraryViewModel.refresh(force = false)
     }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -473,13 +434,13 @@ fun MetrolistApp(
             onRejectPairing = AndroidDeviceConnect.manager::rejectPairing,
         )
         val initialStartRoute = remember { resolveAndPersistStartupScreen() }
-        val topLevelRoutes = remember { setOf(Screen.Home, Screen.Search, Screen.Library, Screen.EasterEgg) }
+        val topLevelRoutes = remember { setOf(Screen.Home, Screen.Search, Screen.Library) }
         val navigationState =
             key(navigationSaveKey) {
                 rememberNavigationState(
                     startRoute = initialStartRoute,
                     topLevelRoutes = topLevelRoutes,
-                    initialDestination = remember { defaultOpenTabScreen(Settings.shared.defaultOpenTab) },
+                    initialDestination = Screen.Library,
                 )
             }
 
@@ -514,30 +475,6 @@ fun MetrolistApp(
                 else -> Unit
             }
         }
-        PopupVisibility(visible = YouTubeSessionState.showExpiredSessionNotice) {
-            AlertDialog(
-                onDismissRequest = YouTubeSessionState::dismissExpiredSessionNotice,
-                title = { Text(stringResource(Res.string.youtube_session_expired_title)) },
-                text = { Text(stringResource(Res.string.youtube_session_expired_message)) },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            YouTubeSessionState.dismissExpiredSessionNotice()
-                            navigator.navigate(Screen.Login)
-                        },
-                        shapes = ButtonDefaults.shapes(),
-                    ) {
-                        Text(stringResource(Res.string.action_login))
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = YouTubeSessionState::dismissExpiredSessionNotice, shapes = ButtonDefaults.shapes()) {
-                        Text(stringResource(Res.string.action_not_now))
-                    }
-                },
-            )
-        }
-        var pendingSearchQuery by remember { mutableStateOf<String?>(null) }
         var pendingRoomCode by rememberSaveable { mutableStateOf<String?>(null) }
         var continuePlaybackPromptHandled by rememberSaveable { mutableStateOf(false) }
         var showContinuePlaybackPrompt by rememberSaveable { mutableStateOf(false) }
@@ -633,6 +570,29 @@ fun MetrolistApp(
         }
 
         val playerConnection = playbackViewModel.playerConnection
+        val database: MusicDatabase = koinInject()
+        fun playLocalAlbum(albumId: String) {
+            coroutineScope.launch {
+                val (title, songs) =
+                    withContext(Dispatchers.IO) {
+                        val dao = database.dao()
+                        (dao.album(albumId).first()?.album?.title ?: albumId) to
+                            dao.albumSongs(albumId).first().map { it.toSongItem() }
+                    }
+                if (songs.isNotEmpty()) playerConnection.playQueue(songs, queueTitle = title, finite = true)
+            }
+        }
+        fun playLocalArtist(artistId: String) {
+            coroutineScope.launch {
+                val (title, songs) =
+                    withContext(Dispatchers.IO) {
+                        val dao = database.dao()
+                        (dao.artist(artistId).first()?.artist?.name ?: artistId) to
+                            dao.storedArtistSongs(artistId).first().map { it.toSongItem() }
+                    }
+                if (songs.isNotEmpty()) playerConnection.playQueue(songs, queueTitle = title, finite = true)
+            }
+        }
         val playbackController = remember(playerConnection) { AndroidPlaybackController(playerConnection, coroutineScope) }
         var listenTogetherManager by remember(playerConnection) {
             mutableStateOf(AndroidListenTogetherManager.currentManager)
@@ -657,7 +617,6 @@ fun MetrolistApp(
             }
         val playerViewModel: PlayerViewModel = koinInject()
         val downloadManager: SongDownloadManager = koinInject()
-        val database: MusicDatabase = koinInject()
         val downloadedSongIds by
             remember(database) {
                 database.dao().cachedAudioIdsByKind(KIND_DOWNLOAD).distinctUntilChanged().map { ids ->
@@ -707,7 +666,6 @@ fun MetrolistApp(
             }
         }
 
-        var searchResultsVisible by rememberSaveable { mutableStateOf(false) }
         val isAndroidTv = remember(context) { context.isAndroidTv() }
         val isAutomotive = remember(context) { context.isAndroidAutomotive() }
         val adaptiveFormFactor =
@@ -731,8 +689,7 @@ fun MetrolistApp(
         val captionHeight = WindowInsets.captionBar.getTop(LocalDensity.current)
         val hasDesktopCaption = shouldUseDesktopCaption(Build.VERSION.SDK_INT, captionHeight, useDesktopLayout)
         val shouldShowNavigationBar =
-            (useDesktopUi || currentRoute in topLevelRoutes) &&
-                !(currentRoute == Screen.Search && searchResultsVisible)
+            useDesktopUi || currentRoute in topLevelRoutes
         val usesDirectionalNavigation = isAndroidTv || isAutomotive
         val navigationSuiteType =
             when {
@@ -760,7 +717,7 @@ fun MetrolistApp(
         val immersiveContent = remember { mutableStateOf(false) }
         val shouldRenderMiniPlayer = shouldShowMiniPlayer && !shouldHideMiniPlayerForIme
 
-        val topLevelScreens = remember { setOf(Screen.Home, Screen.Library, Screen.EasterEgg) }
+        val topLevelScreens = remember { setOf(Screen.Home, Screen.Search, Screen.Library) }
         val shouldShowTopBar =
             navigationState.topLevelRoute in topLevelScreens && currentRoute in topLevelScreens
 
@@ -912,65 +869,28 @@ fun MetrolistApp(
             LocalPlaylistAdder provides addToPlaylist,
         ) {
             val appAccountButton: @Composable (Modifier) -> Unit = { buttonModifier ->
-                val accountName = authManager.accountName
-                val accountThumbnail = authManager.accountThumbnail
-                var showAccountMenu by remember { mutableStateOf(false) }
                 val updatePending = stringResource(Res.string.update_pending)
-                Box {
-                    IconButton(
-                        onClick = { showAccountMenu = true },
-                        modifier =
-                            (
-                                if (hasPendingUpdate) {
-                                    buttonModifier.semantics { stateDescription = updatePending }
-                                } else {
-                                    buttonModifier
-                                }
-                            ).tvFocusHighlight(
-                                CircleShape,
-                                scale = 1.08f,
-                                bringIntoView = false,
-                            ).navigationPopupSource(),
-                        shapes = IconButtonDefaults.shapes(),
-                    ) {
-                        TopBarProfileAvatar(
-                            accountName = accountName,
-                            accountThumbnail = accountThumbnail,
-                            hasPendingUpdate = hasPendingUpdate,
-                        )
-                    }
-                    if (showAccountMenu) {
-                        AccountMenu(
-                            onClose = { showAccountMenu = false },
-                            onNavigateToLogin = { navigator.navigate(Screen.Login) },
-                            onNavigateToTokenLogin = { navigator.navigate(Screen.TokenLogin) },
-                            onNavigateToSwitchChannel = {
-                                navigator.navigate(Screen.SwitchChannel)
-                            },
-                            onNavigateToHistory =
-                                if (navigationState.topLevelRoute == Screen.Library) {
-                                    { navigator.navigate(Screen.History) }
-                                } else {
-                                    null
-                                },
-                            onNavigateToStatistics = { navigator.navigate(Screen.Statistics) },
-                            onNavigateToIntegrations = { navigator.navigate(Screen.Integrations) },
-                            onNavigateToSettings = { navigator.navigate(Screen.Settings) },
-                            onLogout = {
-                                coroutineScope.launch {
-                                    authManager.clearAllCredentials()
-                                    context.packageManager
-                                        .getLaunchIntentForPackage(context.packageName)
-                                        ?.apply {
-                                            addFlags(
-                                                Intent.FLAG_ACTIVITY_NEW_TASK or
-                                                    Intent.FLAG_ACTIVITY_CLEAR_TASK,
-                                            )
-                                        }?.let(context::startActivitySafely)
-                                }
-                            },
-                        )
-                    }
+                IconButton(
+                    onClick = { navigator.navigate(Screen.Settings) },
+                    modifier =
+                        (
+                            if (hasPendingUpdate) {
+                                buttonModifier.semantics { stateDescription = updatePending }
+                            } else {
+                                buttonModifier
+                            }
+                        ).tvFocusHighlight(
+                            CircleShape,
+                            scale = 1.08f,
+                            bringIntoView = false,
+                        ),
+                    shapes = IconButtonDefaults.shapes(),
+                ) {
+                    TopBarProfileAvatar(
+                        accountName = null,
+                        accountThumbnail = null,
+                        hasPendingUpdate = hasPendingUpdate,
+                    )
                 }
             }
             Column(
@@ -1122,13 +1042,6 @@ fun MetrolistApp(
 
                     LaunchedEffect(incomingIntent) {
                         val intent = incomingIntent ?: return@LaunchedEffect
-                        if (intent.action == MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH) {
-                            playerConnection.playFromSearch(
-                                voiceSearchRequest(intent.getStringExtra(SearchManager.QUERY).orEmpty(), intent.extras),
-                            )
-                            onIncomingIntentConsumed(intent)
-                            return@LaunchedEffect
-                        }
                         val destination = intent.toIncomingDestination()
                         if (!Settings.shared.listenTogetherEnabled &&
                             (destination is IncomingDestination.ListenTogether || destination == IncomingDestination.ListenTogetherRoom)
@@ -1136,21 +1049,12 @@ fun MetrolistApp(
                             onIncomingIntentConsumed(intent)
                             return@LaunchedEffect
                         }
-                        if (destination != null && destination !is IncomingDestination.Search) {
-                            pendingSearchQuery = null
-                        }
-                        if (destination != null && destination !is IncomingDestination.Player &&
-                            destination !is IncomingDestination.PlayVideo && destination !is IncomingDestination.PlaySearch
-                        ) {
+                        if (destination != null && destination !is IncomingDestination.Player) {
                             pendingOpenPlayer = false
                             if (hasMedia) playerBottomSheetState.collapseSoft()
                         }
                         when (destination) {
                             null -> {}
-
-                            IncomingDestination.Home -> {
-                                navigator.navigateToRoot(Screen.Home)
-                            }
 
                             IncomingDestination.Library -> {
                                 navigator.navigateToRoot(Screen.Library)
@@ -1173,10 +1077,6 @@ fun MetrolistApp(
                                 navigator.navigate(Screen.Settings)
                             }
 
-                            IncomingDestination.Login -> {
-                                navigator.navigate(Screen.Login)
-                            }
-
                             IncomingDestination.BackupRestore -> {
                                 navigator.navigate(Screen.BackupRestore)
                             }
@@ -1189,29 +1089,6 @@ fun MetrolistApp(
                                 pendingOpenPlayer = true
                             }
 
-                            is IncomingDestination.Search -> {
-                                pendingSearchQuery = destination.query
-                                navigator.navigateToRoot(Screen.Search)
-                            }
-
-                            is IncomingDestination.PlaySearch -> {
-                                val songs =
-                                    runCatching {
-                                        GlobalYouTubeRepository.instance
-                                            .searchFiltered(destination.query, SearchFilter.SONG)
-                                            .items
-                                            .filterIsInstance<SongItem>()
-                                    }.getOrDefault(emptyList())
-                                if (songs.isNotEmpty()) {
-                                    playerConnection.playQueue(songs, finite = true)
-                                } else {
-                                    pendingSearchQuery = destination.query
-                                    pendingOpenPlayer = false
-                                    if (hasMedia) playerBottomSheetState.collapseSoft()
-                                    navigator.navigateToRoot(Screen.Search)
-                                }
-                            }
-
                             is IncomingDestination.Album -> {
                                 navigator.navigate(Screen.Album(destination.id))
                             }
@@ -1220,20 +1097,12 @@ fun MetrolistApp(
                                 navigator.navigate(Screen.Artist(destination.id))
                             }
 
-                            is IncomingDestination.Podcast -> {
-                                navigator.navigate(Screen.Podcast(destination.id))
-                            }
-
                             is IncomingDestination.Playlist -> {
                                 navigator.navigate(Screen.Playlist(destination.id))
                             }
 
                             is IncomingDestination.AutoPlaylist -> {
                                 navigator.navigate(Screen.AutoPlaylist(destination.type))
-                            }
-
-                            is IncomingDestination.Browse -> {
-                                navigator.navigate(Screen.Browse(destination.id, destination.params, destination.title))
                             }
 
                             is IncomingDestination.ListenTogether -> {
@@ -1250,16 +1119,6 @@ fun MetrolistApp(
                                 }
                             }
 
-                            is IncomingDestination.PlayVideo -> {
-                                val song =
-                                    incomingPlaybackSong?.await() ?: resolveIncomingPlaybackSong(
-                                        videoId = destination.videoId,
-                                        fallbackArtist = youtubeMusicLabel,
-                                        loadMetadata = GlobalYouTubeRepository.instance::getSongMetadata,
-                                        loadPlayerInformation = GlobalYouTubeRepository.instance::getSongPlayerInformation,
-                                    )
-                                playerConnection.playSong(song, "", startPositionMs = destination.startPositionMs)
-                            }
                         }
                         onIncomingIntentConsumed(intent)
                     }
@@ -1595,10 +1454,8 @@ fun MetrolistApp(
                                                     val navEntryProvider =
                                                         remember(
                                                             navigator,
-                                                            authManager,
                                                             context,
                                                             coroutineScope,
-                                                            pendingSearchQuery,
                                                             pendingRoomCode,
                                                             floatingActionsBottomInset,
                                                             homeScrollToTopEvents,
@@ -1607,16 +1464,15 @@ fun MetrolistApp(
                                                         ) {
                                                             getEntryProvider(
                                                                 navigator,
-                                                                authManager,
                                                                 context,
                                                                 coroutineScope,
-                                                                pendingSearchQuery,
                                                                 pendingRoomCode,
                                                                 floatingActionsBottomInset,
                                                                 homeScrollToTopEvents,
                                                                 libraryScrollToTopEvents,
                                                                 libraryViewModel,
-                                                                onSearchResultsVisible = { searchResultsVisible = it },
+                                                                ::playLocalAlbum,
+                                                                ::playLocalArtist,
                                                             )
                                                         }
                                                     CompositionLocalProvider(LocalHostDefaultProvider provides routeHostDefaults) {
@@ -1856,14 +1712,8 @@ fun MetrolistApp(
                                         }
                                     }
                                 },
-                                onNavigateToAlbum = { albumId ->
-                                    playerBottomSheetState.collapseSoft()
-                                    navigator.navigate(Screen.Album(albumId))
-                                },
-                                onNavigateToArtist = { artistId ->
-                                    playerBottomSheetState.collapseSoft()
-                                    navigator.navigate(Screen.Artist(artistId))
-                                },
+                                onNavigateToAlbum = playLocalAlbum,
+                                onNavigateToArtist = playLocalArtist,
                                 onNavigateToListenTogether = {
                                     playerBottomSheetState.collapseSoft()
                                     navigator.navigate(Screen.ListenTogether)
@@ -2164,12 +2014,6 @@ private fun GitHubRelease.changelogSnippet(): String {
 val navTabMetadata: Map<String, Any> = mapOf("nav_tab" to true)
 
 sealed class IncomingDestination {
-    data class Podcast(
-        val id: String,
-    ) : IncomingDestination()
-
-    object Home : IncomingDestination()
-
     object Library : IncomingDestination()
 
     object Downloads : IncomingDestination()
@@ -2184,21 +2028,11 @@ sealed class IncomingDestination {
 
     object Settings : IncomingDestination()
 
-    object Login : IncomingDestination()
-
     object BackupRestore : IncomingDestination()
 
     object Recognition : IncomingDestination()
 
     object Player : IncomingDestination()
-
-    data class Search(
-        val query: String?,
-    ) : IncomingDestination()
-
-    data class PlaySearch(
-        val query: String,
-    ) : IncomingDestination()
 
     data class Album(
         val id: String,
@@ -2216,21 +2050,10 @@ sealed class IncomingDestination {
         val type: String,
     ) : IncomingDestination()
 
-    data class Browse(
-        val id: String,
-        val params: String?,
-        val title: String?,
-    ) : IncomingDestination()
-
     data class ListenTogether(
         val roomCode: String,
     ) : IncomingDestination()
 
-    data class PlayVideo(
-        val videoId: String,
-        val playlistId: String?,
-        val startPositionMs: Long = 0L,
-    ) : IncomingDestination()
 }
 
 fun Intent.toIncomingDestination(): IncomingDestination? {
@@ -2238,81 +2061,33 @@ fun Intent.toIncomingDestination(): IncomingDestination? {
         return widgetTargetDestination()
     }
 
-    val urls =
+    val url =
         when (action) {
-            Intent.ACTION_VIEW, NfcAdapter.ACTION_NDEF_DISCOVERED -> {
-                listOfNotNull(dataString)
-            }
-
-            Intent.ACTION_SEND -> {
+            Intent.ACTION_VIEW, NfcAdapter.ACTION_NDEF_DISCOVERED -> dataString
+            Intent.ACTION_SEND ->
                 if (type == "text/plain") {
-                    getCharSequenceExtra(Intent.EXTRA_TEXT)
-                        ?.toString()
-                        ?.trim()
-                        ?.split(Regex("\\s+"))
-                        .orEmpty()
+                    getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.trim()
                 } else {
-                    emptyList()
+                    null
                 }
-            }
-
-            else -> {
-                emptyList()
-            }
+            else -> null
         }
-    urls.firstNotNullOfOrNull(::incomingUrlDestination)?.let { return it }
+    url?.let { rawUri ->
+        parseListenTogetherInvitation(rawUri)?.let { return IncomingDestination.ListenTogether(it) }
+        extractListenTogetherRoomCode(rawUri)?.let { return IncomingDestination.ListenTogether(it) }
+    }
 
     return when (action) {
-        MainActivity.ACTION_SEARCH -> IncomingDestination.Search(null)
         MainActivity.ACTION_LIBRARY -> IncomingDestination.Library
         MainActivity.ACTION_PLAYLIST_IMPORT -> IncomingDestination.PlaylistImport(getStringExtra(MainActivity.EXTRA_IMPORT_RESULT_MESSAGE))
         MainActivity.ACTION_DOWNLOADS -> IncomingDestination.Downloads
         MainActivity.ACTION_LISTEN_TOGETHER -> IncomingDestination.ListenTogetherRoom
         MainActivity.ACTION_UPDATES -> IncomingDestination.Updates
-        MainActivity.ACTION_LOGIN -> IncomingDestination.Login
         Intent.ACTION_APPLICATION_PREFERENCES -> IncomingDestination.Settings
         MainActivity.ACTION_BACKUP_RESTORE -> IncomingDestination.BackupRestore
         MainActivity.ACTION_RECOGNITION -> IncomingDestination.Recognition
         else -> null
     }
-}
-
-private fun incomingUrlDestination(rawUri: String): IncomingDestination? {
-    parseYouTubePodcastId(rawUri)?.let { return IncomingDestination.Podcast(it) }
-    parseListenTogetherInvitation(rawUri)?.let { return IncomingDestination.ListenTogether(it) }
-    extractListenTogetherRoomCode(rawUri)?.let { return IncomingDestination.ListenTogether(it) }
-    when (val parsed = parseYouTubeUrl(rawUri)) {
-        is YouTubeUrlParser.ParsedUrl.Video -> {
-            return IncomingDestination.PlayVideo(parsed.id, null, parseYouTubeStartPositionMs(rawUri))
-        }
-
-        is YouTubeUrlParser.ParsedUrl.Playlist -> {
-            return IncomingDestination.Playlist(parsed.id)
-        }
-
-        is YouTubeUrlParser.ParsedUrl.Album -> {
-            return IncomingDestination.Album(parsed.id)
-        }
-
-        is YouTubeUrlParser.ParsedUrl.Artist -> {
-            return IncomingDestination.Artist(parsed.id)
-        }
-
-        null -> {}
-    }
-    val uri = rawUri.toUri()
-    val host = uri.host?.lowercase()
-    if ((uri.scheme == "https" || uri.scheme == "http") &&
-        (host == "youtube.com" || host?.endsWith(".youtube.com") == true) &&
-        uri.path == "/search"
-    ) {
-        return uri
-            .getQueryParameter("q")
-            ?.trim()
-            ?.takeIf(String::isNotEmpty)
-            ?.let(IncomingDestination::Search)
-    }
-    return null
 }
 
 fun Intent.widgetTargetDestination(): IncomingDestination? {
@@ -2337,8 +2112,6 @@ fun Intent.widgetTargetDestination(): IncomingDestination? {
 
         PlaylistWidgetReceiver.TARGET_TYPE_TOP -> IncomingDestination.AutoPlaylist("top100")
 
-        "SONG" -> IncomingDestination.PlayVideo(id, null)
-
         else -> null
     }
 }
@@ -2346,22 +2119,8 @@ fun Intent.widgetTargetDestination(): IncomingDestination? {
 fun String.sanitizeRoomCode(): String = filter { it.isLetterOrDigit() }.uppercase().take(8)
 
 fun resolveAndPersistStartupScreen(): Screen {
-    val default =
-        when {
-            Settings.shared.defaultOpenTab == "MYSTERIOUS" -> {
-                Screen.EasterEgg
-            }
-
-            else -> {
-                when (defaultOpenTabRoot(Settings.shared.defaultOpenTab)) {
-                    "SEARCH" -> Screen.Search
-                    "LIBRARY" -> Screen.Library
-                    else -> Screen.Home
-                }
-            }
-        }
     Settings.shared.isExpanded = false
-    return default
+    return Screen.Library
 }
 
 fun NavKey.isVisibleNavigationScreen(): Boolean =
@@ -2372,40 +2131,25 @@ fun NavKey.isVisibleNavigationScreen(): Boolean =
 
 fun getEntryProvider(
     navigator: Navigator,
-    authManager: AuthManager,
     context: Context,
     scope: CoroutineScope,
-    pendingSearchQuery: String?,
     pendingRoomCode: String?,
     floatingActionsBottomInset: State<Dp>,
     homeScrollToTopEvents: SharedFlow<Long>,
     libraryScrollToTopEvents: SharedFlow<Long>,
     libraryViewModel: LibraryViewModel,
-    onSearchResultsVisible: (Boolean) -> Unit = {},
+    playLocalAlbum: (String) -> Unit,
+    playLocalArtist: (String) -> Unit,
 ): (NavKey) -> NavEntry<NavKey> =
     entryProvider<NavKey> {
         entry<Screen.Home>(metadata = navTabMetadata) {
-            HomeScreen(
+            LibraryScreen(
+                viewModel = libraryViewModel,
                 floatingActionsBottomInset = floatingActionsBottomInset,
-                onNavigateToAlbum = { albumId -> navigator.navigate(Screen.Album(albumId)) },
-                onNavigateToArtist = { artistId -> navigator.navigate(Screen.Artist(artistId)) },
-                onNavigateToPlaylist = { id, thumbnail -> navigator.navigate(Screen.Playlist(id, thumbnailHint = thumbnail)) },
-                onNavigateToPodcast = { podcastId -> navigator.navigate(Screen.Podcast(podcastId)) },
-                onNavigateToRecognition = { navigator.navigate(Screen.Recognition) },
-                onNavigateToLibrary = { filter ->
-                    filter?.let { Settings.shared.libraryFilter = it }
-                    navigator.navigate(Screen.Library)
-                },
-                onNavigateToBrowse = { browseId, params, title ->
-                    navigator.navigate(Screen.Browse(browseId, params, title))
-                },
-                onNavigateToVideoBrowse = { browseId, params, title ->
-                    navigator.navigate(Screen.Browse(browseId, params, title))
-                },
-                onNavigateToHomeSection = { shelf ->
-                    navigator.navigate(Screen.HomeSection(shelf.pageKey, shelf.title, shelf.toHomeSection()))
-                },
                 scrollToTopEvents = homeScrollToTopEvents,
+                onNavigateToAlbum = playLocalAlbum,
+                onNavigateToArtist = playLocalArtist,
+                onNavigateToPlaylist = { id, thumbnail -> navigator.navigate(Screen.Playlist(id, thumbnailHint = thumbnail)) },
             )
         }
 
@@ -2421,8 +2165,8 @@ fun getEntryProvider(
                 section = section.section,
                 title = section.title,
                 onBackClick = { navigator.goBack() },
-                onNavigateToAlbum = { albumId -> navigator.navigate(Screen.Album(albumId)) },
-                onNavigateToArtist = { artistId -> navigator.navigate(Screen.Artist(artistId)) },
+                onNavigateToAlbum = playLocalAlbum,
+                onNavigateToArtist = playLocalArtist,
                 onNavigateToPlaylist = { id, thumbnail -> navigator.navigate(Screen.Playlist(id, thumbnailHint = thumbnail)) },
                 onNavigateToPodcast = { podcastId -> navigator.navigate(Screen.Podcast(podcastId)) },
                 onNavigateToBrowse = { browseId, params, title ->
@@ -2438,8 +2182,8 @@ fun getEntryProvider(
                 title = browse.title,
                 startVideo = browse.startVideo,
                 onBackClick = { navigator.goBack() },
-                onNavigateToAlbum = { albumId -> navigator.navigate(Screen.Album(albumId)) },
-                onNavigateToArtist = { artistId -> navigator.navigate(Screen.Artist(artistId)) },
+                onNavigateToAlbum = playLocalAlbum,
+                onNavigateToArtist = playLocalArtist,
                 onNavigateToPlaylist = { id, thumbnail -> navigator.navigate(Screen.Playlist(id, thumbnailHint = thumbnail)) },
                 onNavigateToPodcast = { podcastId -> navigator.navigate(Screen.Podcast(podcastId)) },
                 onNavigateToBrowse = { browseId, params, title ->
@@ -2453,8 +2197,8 @@ fun getEntryProvider(
                 viewModel = libraryViewModel,
                 floatingActionsBottomInset = floatingActionsBottomInset,
                 scrollToTopEvents = libraryScrollToTopEvents,
-                onNavigateToAlbum = { albumId -> navigator.navigate(Screen.Album(albumId)) },
-                onNavigateToArtist = { artistId -> navigator.navigate(Screen.Artist(artistId)) },
+                onNavigateToAlbum = playLocalAlbum,
+                onNavigateToArtist = playLocalArtist,
                 onNavigateToPlaylist = { id, thumbnail -> navigator.navigate(Screen.Playlist(id, thumbnailHint = thumbnail)) },
                 onNavigateToPodcast = { podcastId -> navigator.navigate(Screen.Podcast(podcastId)) },
                 onNavigateToPlaylistImport = { navigator.navigate(Screen.PlaylistImport) },
@@ -2467,11 +2211,12 @@ fun getEntryProvider(
         }
 
         entry<Screen.Search>(metadata = navTabMetadata) {
-            SearchScreen(
-                navigator = navigator,
+            LibraryScreen(
+                viewModel = libraryViewModel,
                 floatingActionsBottomInset = floatingActionsBottomInset,
-                initialQuery = pendingSearchQuery,
-                onSearchResultsVisible = onSearchResultsVisible,
+                onNavigateToAlbum = playLocalAlbum,
+                onNavigateToArtist = playLocalArtist,
+                onNavigateToPlaylist = { id, thumbnail -> navigator.navigate(Screen.Playlist(id, thumbnailHint = thumbnail)) },
             )
         }
 
@@ -2486,29 +2231,6 @@ fun getEntryProvider(
         }
         entry<Screen.History>(metadata = navTabMetadata) {
             HistoryScreen(onNavigateBack = { navigator.goBack() })
-        }
-
-        entry<Screen.Login>(metadata = navTabMetadata) {
-            LoginScreen(
-                onNavigateBack = { navigator.goBack() },
-                onNavigateToTokenLogin = { navigator.navigate(Screen.TokenLogin) },
-            )
-        }
-
-        entry<Screen.SwitchChannel>(metadata = navTabMetadata) {
-            LoginScreen(
-                onNavigateBack = { navigator.goBack() },
-                onNavigateToTokenLogin = { navigator.navigate(Screen.TokenLogin) },
-                isSwitchingChannel = true,
-            )
-        }
-
-        entry<Screen.TokenLogin>(metadata = navTabMetadata) {
-            val miniPlayerInset = LocalMiniPlayerBottomInset.current
-            TokenLoginScreen(
-                onNavigateBack = { navigator.goBack() },
-                bottomContentPadding = miniPlayerInset,
-            )
         }
 
         entry<Screen.Album>(metadata = navTabMetadata + detailViewModelMetadata) { album ->

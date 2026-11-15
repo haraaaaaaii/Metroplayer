@@ -1,7 +1,9 @@
 package com.metrolist.android
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
@@ -10,6 +12,7 @@ import android.os.Trace
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,45 +45,29 @@ import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.lifecycleScope
 import com.metrolist.android.deviceconnect.AndroidDeviceConnect
-import com.metrolist.android.listentogether.AndroidListenTogetherManager
 import com.metrolist.android.locale.AppLocale
+import com.metrolist.android.media.MediaStoreAudioLibrary
 import com.metrolist.android.onboarding.OnboardingDestination
 import com.metrolist.android.onboarding.OnboardingScreen
-import com.metrolist.android.playback.PlayerConnection
-import com.metrolist.android.playback.playbackAudioQuality
-import com.metrolist.android.playback.prefetchIncomingAudio
-import com.metrolist.android.playback.resolveIncomingPlaybackSong
-import com.metrolist.android.playback.toAndroidContentHints
-import com.metrolist.android.ui.IncomingDestination
 import com.metrolist.android.ui.MetrolistApp
 import com.metrolist.android.ui.screens.settings.DiscordLoginFlow
 import com.metrolist.android.ui.theme.MetrolistTheme
-import com.metrolist.android.ui.toIncomingDestination
 import com.metrolist.android.utils.CrashHandler
 import com.metrolist.android.utils.isAndroidTv
-import com.metrolist.innertubex.extraction.TokenProvider
-import com.metrolist.shared.model.SongItem
 import com.metrolist.shared.settings.LibraryFilterType
 import com.metrolist.shared.settings.Settings
 import com.metrolist.shared.settings.defaultOpenTabRoot
-import com.metrolist.shared.state.GlobalYouTube
-import com.metrolist.shared.state.GlobalYouTubeRepository
-import com.metrolist.shared.state.applyContentRegion
 import com.metrolist.shared.ui.LocalIsInPipMode
 import com.metrolist.shared.ui.LocalIsTv
 import com.metrolist.shared.ui.theme.appearanceDensity
-import com.metrolist.shared.youtube.playback.AndroidTokenProvider
-import com.metrolist.shared.youtube.playback.PlaybackNetworkStateStore
-import com.metrolist.shared.youtube.playback.StreamResolver
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.get
 import java.util.UUID
@@ -102,14 +89,12 @@ internal class NavigationRestorationViewModel(
 
 class MainActivity : ComponentActivity() {
     companion object {
-        const val ACTION_SEARCH = "com.metrolist.music.action.SEARCH"
         const val ACTION_PLAYLIST_IMPORT = "com.metrolist.music.action.PLAYLIST_IMPORT"
         const val EXTRA_IMPORT_RESULT_MESSAGE = "import_result_message"
         const val ACTION_DOWNLOADS = "com.metrolist.music.action.DOWNLOADS"
         const val ACTION_LISTEN_TOGETHER = "com.metrolist.music.action.LISTEN_TOGETHER"
         const val ACTION_LIBRARY = "com.metrolist.music.action.LIBRARY"
         const val ACTION_UPDATES = "com.metrolist.music.action.UPDATES"
-        const val ACTION_LOGIN = "com.metrolist.music.action.LOGIN"
         const val ACTION_BACKUP_RESTORE = "com.metrolist.music.action.BACKUP_RESTORE"
         const val ACTION_RECOGNITION = "com.metrolist.music.action.RECOGNITION"
         const val ACTION_OPEN_WIDGET_TARGET = "com.metrolist.music.action.OPEN_WIDGET_TARGET"
@@ -125,11 +110,18 @@ class MainActivity : ComponentActivity() {
     }
 
     private val incomingIntentState = mutableStateOf<Intent?>(null)
-    private var incomingPlaybackSong: Deferred<SongItem>? = null
     private val isInPipModeState = mutableStateOf(false)
     private val navigationRestoration: NavigationRestorationViewModel by viewModels()
     private lateinit var startupPresentation: StartupPresentation
     private var startupTraceOpen = false
+    private val requestAudioPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    get<MediaStoreAudioLibrary>().refresh()
+                }
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val app = application as App
@@ -225,49 +217,9 @@ class MainActivity : ComponentActivity() {
                 }
                 consumeDiscordCallback(intent)
                 app.restoreDeviceConnectIfEnabled()
-                prepareIncomingPlayback()
                 showContent()
             }
         }
-    }
-
-    private fun prepareIncomingPlayback() {
-        if (!(application as App).onboardingManager.isComplete) return
-        val destination = incomingIntentState.value?.toIncomingDestination() as? IncomingDestination.PlayVideo ?: return
-        GlobalYouTube.applyContentRegion(
-            contentCountry = Settings.shared.contentCountry,
-            contentLanguage = Settings.shared.contentLanguage,
-            systemLocale = AppLocale.systemLocale(this),
-        )
-        lifecycleScope.launch {
-            (get<TokenProvider>() as? AndroidTokenProvider)?.prewarm()
-        }
-        get<PlayerConnection>().ensureConnected()
-        incomingPlaybackSong =
-            lifecycleScope.async(Dispatchers.IO) {
-                val song =
-                    resolveIncomingPlaybackSong(
-                        videoId = destination.videoId,
-                        fallbackArtist = getString(R.string.youtube_music),
-                        loadMetadata = GlobalYouTubeRepository.instance::getSongMetadata,
-                        loadPlayerInformation = GlobalYouTubeRepository.instance::getSongPlayerInformation,
-                    )
-                prefetchIncomingAudio(
-                    song = song,
-                    wantVideo = Settings.shared.videoViewerVisible,
-                    canPlayLocally =
-                        PlaybackNetworkStateStore.current.connected &&
-                            !AndroidListenTogetherManager.isGuestPlaybackLocked && !AndroidDeviceConnect.manager.remote.isActive,
-                ) { source ->
-                    get<StreamResolver>().resolve(
-                        source.id,
-                        source.toAndroidContentHints(wantVideo = false),
-                        playbackAudioQuality(),
-                        sourceSong = source,
-                    )
-                }
-                song
-            }
     }
 
     private fun showContent() {
@@ -312,7 +264,6 @@ class MainActivity : ComponentActivity() {
                         MetrolistApp(
                             navigationSaveKey = navigationRestoration.saveKey,
                             incomingIntent = incomingIntentState.value,
-                            incomingPlaybackSong = incomingPlaybackSong,
                             onExitApp = ::finish,
                             onIncomingIntentConsumed = { consumed ->
                                 if (incomingIntentState.value === consumed) {
@@ -330,13 +281,10 @@ class MainActivity : ComponentActivity() {
                                     hasLegacyInstallationOverride = app.hadLegacyInstallationAtStartup,
                                     onComplete = { sendCrashReports, destination ->
                                         app.completeOnboarding(sendCrashReports)
-                                        incomingIntentState.value =
-                                            when (destination) {
-                                                OnboardingDestination.HOME -> incomingIntentState.value
-                                                OnboardingDestination.LOGIN -> Intent(ACTION_LOGIN)
-                                                OnboardingDestination.BACKUP_RESTORE -> Intent(ACTION_BACKUP_RESTORE)
-                                            }
-                                        prepareIncomingPlayback()
+                                        if (destination == OnboardingDestination.BACKUP_RESTORE) {
+                                            incomingIntentState.value = Intent(ACTION_BACKUP_RESTORE)
+                                        }
+                                        requestAudioLibraryPermission()
                                         onboardingComplete = true
                                     },
                                 )
@@ -345,6 +293,19 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+        if ((application as App).onboardingManager.isComplete) requestAudioLibraryPermission()
+    }
+
+    private fun requestAudioLibraryPermission() {
+        val permission =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                Manifest.permission.READ_MEDIA_AUDIO
+            } else {
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            }
+        if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+            requestAudioPermission.launch(permission)
         }
     }
 
@@ -375,8 +336,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        incomingPlaybackSong?.cancel()
-        incomingPlaybackSong = null
         setIntent(intent)
         incomingIntentState.value = intent
         lifecycleScope.launch {

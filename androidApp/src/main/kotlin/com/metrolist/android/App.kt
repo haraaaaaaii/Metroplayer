@@ -49,7 +49,6 @@ import com.metrolist.android.widget.RecognizerWidgets
 import com.metrolist.android.widget.TurntableWidgetReceiver
 import com.metrolist.shared.api.lastfm.LastFM
 import com.metrolist.shared.api.lastfm.LastFmGalleryBrowser
-import com.metrolist.shared.auth.AuthManager
 import com.metrolist.shared.db.MusicDatabase
 import com.metrolist.shared.db.checkAndroidDatabaseVersion
 import com.metrolist.shared.discord.DiscordRpcManager
@@ -184,7 +183,6 @@ class App :
                         infrastructureReady = true
                         withContext(Dispatchers.IO) {
                             Snapshot.withMutableSnapshot { SongLikeState.initialize() }
-                            AuthManager().restorePersistedSession()
                         }
                         if (onboardingManager.isComplete) startDatabaseDependentServices()
                     },

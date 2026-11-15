@@ -390,6 +390,10 @@ class DefaultStreamResolver(
     ): PlaybackResource {
         val uploaded = requestedHints.isUploaded == true || sourceSong?.isUploaded == true || isUploadedType(sourceSong?.musicVideoType)
         val hints = if (uploaded) requestedHints.copy(isUploaded = true, wantVideo = false) else requestedHints
+        if (sourceSong?.isLocal == true) {
+            return localAudioSource?.resolve(videoId, sourceSong)
+                ?: error("No local audio resource is available for $videoId")
+        }
         if (preferLocal && (!hints.wantVideo || !networkState().connected) && hints.playbackClientOverrideId == null) {
             localAudioSource?.resolve(videoId, sourceSong)?.let { return it }
         }

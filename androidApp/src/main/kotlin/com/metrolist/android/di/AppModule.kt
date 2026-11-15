@@ -5,12 +5,14 @@
 
 package com.metrolist.android.di
 
+import android.net.Uri
 import coil3.ImageLoader
 import coil3.imageLoader
 import com.metrolist.android.playback.AudioCacheManager
 import com.metrolist.android.playback.ExoPlaybackBenchmarkPlayer
 import com.metrolist.android.playback.PlayerConnection
 import com.metrolist.android.playback.SongDownloadManager
+import com.metrolist.android.media.MediaStoreAudioLibrary
 import com.metrolist.android.widget.MetrolistWidgetManager
 import com.metrolist.android.widget.PlaylistWidgetManager
 import com.metrolist.innertubex.InnerTube
@@ -31,6 +33,7 @@ import com.metrolist.shared.youtube.benchmark.PlaybackBenchmarkRunner
 import com.metrolist.shared.youtube.logging.MetrolistInnerTubeLogger
 import com.metrolist.shared.youtube.playback.DefaultStreamResolver
 import com.metrolist.shared.youtube.playback.LocalAudioSource
+import com.metrolist.shared.youtube.playback.PlaybackResource
 import com.metrolist.shared.youtube.strategy.ClientHealthTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +52,10 @@ val appModule =
             getDatabaseBuilder(androidContext()).build()
         }
 
+        single {
+            MediaStoreAudioLibrary(androidContext(), get())
+        }
+
         single<DatabaseDao> {
             get<MusicDatabase>().dao()
         }
@@ -62,8 +69,26 @@ val appModule =
 
         single<LocalAudioSource> {
             LocalAudioSource { id, song ->
-                val storedSong = song ?: get<MusicDatabase>().dao().getSongById(id)?.toSongItem()
-                storedSong?.let { get<AudioCacheManager>().getCachedPlaybackResource(it) }
+                val localUri =
+                    song?.endpointParams?.takeIf { it.startsWith("content:") || it.startsWith("file:") }
+                        ?: id.takeIf { it.startsWith("content:") || it.startsWith("file:") }
+                if (localUri != null) {
+                    val uri = Uri.parse(localUri)
+                    PlaybackResource(
+                        videoId = id,
+                        url = localUri,
+                        headers = emptyMap(),
+                        loudnessDb = null,
+                        expiresAt = null,
+                        mimeType = androidContext().contentResolver.getType(uri),
+                        clientName = "local",
+                        profileId = "local",
+                        requireBoundedRange = false,
+                    )
+                } else {
+                    val storedSong = song ?: get<MusicDatabase>().dao().getSongById(id)?.toSongItem()
+                    storedSong?.let { get<AudioCacheManager>().getCachedPlaybackResource(it) }
+                }
             }
         }
 

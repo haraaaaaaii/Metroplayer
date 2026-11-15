@@ -2717,6 +2717,29 @@ class MusicService :
         wantVideo: Boolean = song.isVideoSong,
     ): PlaybackFetchResult =
         withContext(Dispatchers.IO) {
+            if (song.isLocal || song.id.startsWith("local_")) {
+                val localUri =
+                    song.endpointParams?.takeIf { it.startsWith("content:") || it.startsWith("file:") }
+                        ?: song.id.takeIf { it.startsWith("content:") || it.startsWith("file:") }
+                        ?: return@withContext PlaybackFetchResult(
+                            failure = IllegalStateException("Local song has no readable URI"),
+                            errorReason = getString(Res.string.error_unknown),
+                        )
+                return@withContext PlaybackFetchResult(
+                    resource =
+                        PlaybackResource(
+                            videoId = song.id,
+                            url = localUri,
+                            headers = emptyMap(),
+                            loudnessDb = null,
+                            expiresAt = null,
+                            durationSeconds = song.duration,
+                            clientName = "local",
+                            profileId = "local",
+                            requireBoundedRange = false,
+                        ),
+                )
+            }
             val connected = PlaybackNetworkStateStore.current.connected
             cachedAudioResource(wantVideo && connected) { audioCacheManager.getCachedPlaybackResource(song) }
                 ?.let { return@withContext PlaybackFetchResult(resource = it) }

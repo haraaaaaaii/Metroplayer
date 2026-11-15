@@ -373,7 +373,6 @@ internal fun OnboardingScreen(
                 } else {
                     emptyList()
                 },
-            onLogin = { onComplete(sendCrashReports, OnboardingDestination.LOGIN) },
             onRestore = { onComplete(sendCrashReports, OnboardingDestination.BACKUP_RESTORE) },
         )
     }
@@ -411,25 +410,9 @@ private fun OnboardingPage.description(): String =
 
 @Composable
 private fun savedAccounts(): List<OnboardingAccount> {
-    val google = stringResource(Res.string.brand_google)
     val lastFm = stringResource(Res.string.brand_lastfm)
     val discord = stringResource(Res.string.brand_discord)
     return buildList {
-        if (
-            Settings.shared.accountName.isNotBlank() ||
-            Settings.shared.accountEmail.isNotBlank() ||
-            Settings.shared.accountThumbnail.isNotBlank()
-        ) {
-            add(
-                OnboardingAccount(
-                    service = google,
-                    displayName = Settings.shared.accountName.ifBlank { Settings.shared.accountEmail },
-                    imageUrl = Settings.shared.accountThumbnail.ifBlank { null },
-                    fallbackIcon = MetrolistIcons.Outlined.AccountCircle,
-                    fetchGoogleImage = true,
-                ),
-            )
-        }
         if (Settings.shared.lastFmUsername.isNotBlank() || Settings.shared.lastFmSession.isNotBlank()) {
             add(
                 OnboardingAccount(

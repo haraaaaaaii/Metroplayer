@@ -145,8 +145,10 @@ class LibraryViewModel(
     private val scope: CoroutineScope,
     private val database: MusicDatabase? = null,
     private val downloadedSongIds: Flow<Set<String>>? = null,
-    private val repository: YouTubeRepository = GlobalYouTubeRepository.instance,
+    private val repository: YouTubeRepository? = null,
+    private val localOnly: Boolean = false,
 ) {
+    private val remoteRepository by lazy { repository ?: GlobalYouTubeRepository.instance }
     private val _uiState = MutableStateFlow(LibraryUiState(isLoading = database != null))
     private var downloadedKeys: Set<String> = emptySet()
     val uiState: StateFlow<LibraryUiState> = _uiState.asStateFlow()
@@ -214,6 +216,7 @@ class LibraryViewModel(
                                 request.query,
                                 offset = _contentMatchedSongs.value.size,
                                 descending = request.descending,
+                                localOnly = localOnly,
                             )
                         }.orEmpty()
                 if (loadedSearchRequest == request && searchRequest.value == request) {
@@ -258,18 +261,20 @@ class LibraryViewModel(
                 if (active) observeLocal()
             }
         }
-        scope.launch {
-            val accountKey = currentLibraryAccountKey()
-            val cachedAccount = Settings.shared.lastLibraryRefreshAccount
-            val accountChanged = cachedAccount.isNotBlank() && cachedAccount != accountKey
-            if (accountChanged) {
-                LibraryDeletionTracker.clear()
-                cachedRemoteItems = emptyList()
-                Settings.shared.lastLibraryRefreshEpoch = 0L
-                _uiState.update { it.copy(isLoading = true, items = emptyList()) }
+        if (!localOnly) {
+            scope.launch {
+                val accountKey = currentLibraryAccountKey()
+                val cachedAccount = Settings.shared.lastLibraryRefreshAccount
+                val accountChanged = cachedAccount.isNotBlank() && cachedAccount != accountKey
+                if (accountChanged) {
+                    LibraryDeletionTracker.clear()
+                    cachedRemoteItems = emptyList()
+                    Settings.shared.lastLibraryRefreshEpoch = 0L
+                    _uiState.update { it.copy(isLoading = true, items = emptyList()) }
+                }
+                if (cachedAccount.isBlank()) Settings.shared.lastLibraryRefreshAccount = accountKey
+                refresh(force = accountChanged)
             }
-            if (cachedAccount.isBlank()) Settings.shared.lastLibraryRefreshAccount = accountKey
-            refresh(force = accountChanged)
         }
     }
 
@@ -296,7 +301,7 @@ class LibraryViewModel(
             launch {
                 database
                     ?.dao()
-                    ?.albumsLikedByCreateDateAsc(includeSaved = !repository.canManagePlaylists())
+                    ?.albumsLikedByCreateDateAsc(includeSaved = localOnly || !remoteRepository.canManagePlaylists())
                     ?.distinctUntilChanged()
                     ?.collect { localReloads.trySend(Unit) }
             }
@@ -320,7 +325,11 @@ class LibraryViewModel(
                     .debounce(LIBRARY_SEARCH_DEBOUNCE_MILLIS.milliseconds)
                     .distinctUntilChanged()
                     .collectLatest { request ->
-                        val page = database?.let { contentMatchedSongs(it, request.query, descending = request.descending) }.orEmpty()
+                        val page =
+                            database
+                                ?.let {
+                                    contentMatchedSongs(it, request.query, descending = request.descending, localOnly = localOnly)
+                                }.orEmpty()
                         if (searchRequest.value == request) {
                             loadedSearchRequest = request
                             _contentMatchedSongs.value = page
@@ -332,6 +341,10 @@ class LibraryViewModel(
         }
 
     fun refresh(force: Boolean = true) {
+        if (localOnly) {
+            scope.launch { loadLocal() }
+            return
+        }
         val accountKey = currentLibraryAccountKey()
         val accountChanged =
             observedAccountKey != accountKey ||
@@ -364,11 +377,11 @@ class LibraryViewModel(
         scope.launch {
             _uiState.update { it.copy(isLoading = it.items.isEmpty(), isRefreshing = it.items.isNotEmpty(), error = false) }
             try {
-                val canReconcile = repository.canManagePlaylists()
-                val musicResult = repository.getCompleteLibraryItemsResult(force = force)
+                val canReconcile = remoteRepository.canManagePlaylists()
+                val musicResult = remoteRepository.getCompleteLibraryItemsResult(force = force)
                 val (podcastsResult, episodesResult) =
                     if (canReconcile) {
-                        loadPodcastLibrary(repository, canReconcile = true)
+                        loadPodcastLibrary(remoteRepository, canReconcile = true)
                     } else {
                         Result.success(emptyList<PodcastItem>()) to Result.success(emptyList<EpisodeItem>())
                     }
@@ -460,7 +473,7 @@ class LibraryViewModel(
                 countResolutionJob =
                     scope.launch {
                         try {
-                            repository.resolveMissingPlaylistCounts(musicItems) { resolved ->
+                            remoteRepository.resolveMissingPlaylistCounts(musicItems) { resolved ->
                                 if (generation != refreshGeneration ||
                                     currentLibraryAccountKey() != accountKey
                                 ) {
@@ -507,7 +520,7 @@ class LibraryViewModel(
                                         .first()
                                         .isNotEmpty()
                             if (hasDownloads) {
-                                db.repairRemotePlaylistMembership(repository, musicItems.filterIsInstance<PlaylistItem>()) {
+                                db.repairRemotePlaylistMembership(remoteRepository, musicItems.filterIsInstance<PlaylistItem>()) {
                                     generation == refreshGeneration && currentLibraryAccountKey() == accountKey
                                 }
                             }
@@ -599,7 +612,8 @@ class LibraryViewModel(
                 .allPlaylists()
                 .first()
                 .filter { entity ->
-                    entity.id !in autoPlaylistIds && (entity.bookmarkedAt != null || entity.isLocal)
+                    entity.id !in autoPlaylistIds &&
+                        (if (localOnly) entity.isLocal || entity.browseId == null else entity.bookmarkedAt != null || entity.isLocal)
                 }
         downloadedKeys =
             (
@@ -651,14 +665,14 @@ class LibraryViewModel(
                 )
             }
         val songs =
-            dao.songsByCreateDateAsc().first().filterNot { it.song.isEpisode }.map { song ->
+            dao.songsByCreateDateAsc().first().filterNot { it.song.isEpisode }.filter { !localOnly || it.song.isLocal }.map { song ->
                 song.toSongItem().copy(
                     libraryAddedAt = song.song.inLibrary.toEpochMilliseconds(),
                     libraryUpdatedAt = song.song.inLibrary.toEpochMilliseconds(),
                 )
             }
         val episodes =
-            dao.savedPodcastEpisodesByCreateDateAsc().first().asReversed().map { song ->
+            dao.savedPodcastEpisodesByCreateDateAsc().first().asReversed().filter { !localOnly }.map { song ->
                 EpisodeItem(
                     id = song.song.id,
                     title = song.song.title,
@@ -675,7 +689,9 @@ class LibraryViewModel(
                 )
             }
         val artists =
-            dao.artistsBookmarkedByCreateDateAsc().first().map {
+            (if (localOnly) dao.artistsByCreateDateAsc().first() else dao.artistsBookmarkedByCreateDateAsc().first())
+                .filter { !localOnly || it.artist.isLocal }
+                .map {
                 ArtistItem(
                     id = it.artist.id,
                     title = it.artist.name,
@@ -689,7 +705,9 @@ class LibraryViewModel(
                 )
             }
         val albums =
-            dao.albumsLikedByCreateDateAsc(includeSaved = !repository.canManagePlaylists()).first().map {
+            (if (localOnly) dao.albumsByCreateDateAsc().first() else dao.albumsLikedByCreateDateAsc(includeSaved = !remoteRepository.canManagePlaylists()).first())
+                .filter { !localOnly || it.album.isLocal }
+                .map {
                 AlbumItem(
                     id = it.album.id,
                     isDownloaded = "album:${it.album.id}" in downloadedKeys,
@@ -713,7 +731,7 @@ class LibraryViewModel(
                 )
             }
         val podcasts =
-            dao.subscribedPodcasts().first().map {
+            (if (localOnly) emptyList() else dao.subscribedPodcasts().first()).map {
                 PodcastItem(
                     it.id,
                     it.title,
@@ -930,9 +948,10 @@ internal suspend fun contentMatchedSongs(
     query: String,
     offset: Int = 0,
     descending: Boolean = false,
+    localOnly: Boolean = false,
 ): List<SongItem> =
     withContext(Dispatchers.Default) {
         val term = query.trim()
         if (term.length < 2) return@withContext emptyList()
-        database.dao().contentMatchedSongs(term, LIBRARY_SEARCH_PAGE_SIZE, offset, descending).map { it.toSongItem() }
+        database.dao().contentMatchedSongs(term, LIBRARY_SEARCH_PAGE_SIZE, offset, descending, localOnly).map { it.toSongItem() }
     }

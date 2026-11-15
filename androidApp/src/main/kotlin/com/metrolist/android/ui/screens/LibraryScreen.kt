@@ -6,14 +6,8 @@
 
 package com.metrolist.android.ui.screens
 
-import android.content.Context
-import android.content.Intent
 import android.content.res.Configuration
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.os.Handler
-import android.os.Looper
+import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
@@ -42,7 +36,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
@@ -72,7 +65,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.metrolist.android.LocalMiniPlayerBottomInset
-import com.metrolist.android.extensions.isInternetConnected
 import com.metrolist.android.playback.LocalPlayerConnection
 import com.metrolist.android.ui.component.AdaptiveModalBottomSheet
 import com.metrolist.android.ui.component.SwipeGestureHandler
@@ -91,7 +83,6 @@ import com.metrolist.shared.db.MusicDatabase
 import com.metrolist.shared.db.entities.KIND_CACHE
 import com.metrolist.shared.db.entities.toSongItem
 import com.metrolist.shared.db.isHistoryPlaylistId
-import com.metrolist.shared.db.refreshUploadedSongs
 import com.metrolist.shared.generated.resources.Res
 import com.metrolist.shared.generated.resources.action_cannot_be_undone
 import com.metrolist.shared.generated.resources.cancel
@@ -126,7 +117,6 @@ import com.metrolist.shared.settings.HiddenLibraryItems
 import com.metrolist.shared.settings.LibraryFilterType
 import com.metrolist.shared.settings.Settings
 import com.metrolist.shared.settings.initialLibraryFilter
-import com.metrolist.shared.state.GlobalYouTubeRepository
 import com.metrolist.shared.state.SongLikeState
 import com.metrolist.shared.state.UploadNotificationState
 import com.metrolist.shared.ui.LocalIsTv
@@ -257,8 +247,6 @@ fun LibraryScreen(
     var playlistToDelete by remember { mutableStateOf<PlaylistItem?>(null) }
     var exportItem by remember { mutableStateOf<YTItem?>(null) }
     var autoPlaylistToExport by remember { mutableStateOf<LibraryAutoPlaylist?>(null) }
-    var networkAvailable by remember { mutableStateOf(context.isInternetConnected()) }
-    var observedOffline by remember { mutableStateOf(!networkAvailable) }
     val hiddenItemKeys = remember(hiddenItemVersion, contentFilterVersion) { HiddenLibraryItems.keys() }
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val miniPlayerInset = LocalMiniPlayerBottomInset.current
@@ -284,12 +272,30 @@ fun LibraryScreen(
     }
 
     suspend fun loadSongs(item: YTItem): List<SongItem> {
-        if (item is PlaylistItem && item.isLocal) {
-            return database
-                .dao()
-                .playlistSongs(item.id)
-                .first()
-                .map { it.song.toSongItem() }
+        when (item) {
+            is PlaylistItem -> {
+                if (item.isLocal) {
+                    return database
+                        .dao()
+                        .playlistSongs(item.id)
+                        .first()
+                        .map { it.song.toSongItem() }
+                }
+            }
+
+            is AlbumItem -> {
+                if (item.id.startsWith("local-album:")) {
+                    return database.dao().albumSongs(item.id).first().map { it.toSongItem() }
+                }
+            }
+
+            is ArtistItem -> {
+                if (item.id.startsWith("local-artist:")) {
+                    return database.dao().storedArtistSongs(item.id).first().map { it.toSongItem() }
+                }
+            }
+
+            else -> Unit
         }
         return loadMediaItemSongs(item)
     }
@@ -357,17 +363,7 @@ fun LibraryScreen(
                         .map { it.toSongItem() }
                 }
 
-                "uploaded" -> {
-                    runCatching {
-                        database.refreshUploadedSongs(GlobalYouTubeRepository.instance)
-                    }.getOrElse {
-                        database
-                            .dao()
-                            .uploadedSongsByNameAsc()
-                            .first()
-                            .map { it.toSongItem() }
-                    }
-                }
+                "uploaded" -> emptyList()
 
                 else -> {
                     emptyList()
@@ -395,40 +391,9 @@ fun LibraryScreen(
         }
     }
 
-    DisposableEffect(context, rootActive) {
-        if (!rootActive) return@DisposableEffect onDispose { }
-        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val mainHandler = Handler(Looper.getMainLooper())
-
-        fun publishCurrentState() {
-            mainHandler.post { networkAvailable = context.isInternetConnected() }
-        }
-        val callback =
-            object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) = publishCurrentState()
-
-                override fun onCapabilitiesChanged(
-                    network: Network,
-                    networkCapabilities: NetworkCapabilities,
-                ) = publishCurrentState()
-
-                override fun onLost(network: Network) = publishCurrentState()
-            }
-        connectivityManager.registerDefaultNetworkCallback(callback)
-        onDispose {
-            connectivityManager.unregisterNetworkCallback(callback)
-            mainHandler.removeCallbacksAndMessages(null)
-        }
-    }
-
-    LaunchedEffect(networkAvailable, rootActive) {
-        if (!rootActive) return@LaunchedEffect
-        if (!networkAvailable) {
-            observedOffline = true
-        } else if (observedOffline) {
-            observedOffline = false
-            viewModel.refresh(force = true)
-        }
+    LaunchedEffect(rootActive) {
+        viewModel.setActive(rootActive)
+        if (rootActive) viewModel.refresh(force = false)
     }
 
     val onFilterChange: (LibraryFilter?) -> Unit = {
@@ -499,9 +464,15 @@ fun LibraryScreen(
                         onNavigateToPodcast,
                         playerConnection,
                         scope,
+                        songs =
+                            if (searchQuery.isNotBlank()) {
+                                contentMatchedSongs
+                            } else {
+                                uiState.items.filterIsInstance<SongItem>()
+                            },
                     )
                 },
-                onPlaySongs = { songs, index -> playerConnection?.playQueue(songs, index) },
+                onPlaySongs = { songs, index -> playerConnection?.playQueue(songs, index, finite = true) },
                 currentSongId = currentSong?.id,
                 isPlaying = isPlaying,
                 onAutoPlaylistClick = {
@@ -616,10 +587,8 @@ fun LibraryScreen(
                 AlbumMenu(
                     album = item,
                     onDismiss = { menuItem = null },
-                    onPlay = { playerConnection?.playAlbum(item.id, item.title) },
-                    onShuffle = {
-                        playerConnection?.playAlbum(item.id, item.title, shuffle = true)
-                    },
+                    onPlay = { withSongs(item) { playerConnection?.playQueue(it, queueTitle = item.title, finite = true) } },
+                    onShuffle = { withSongs(item) { playerConnection?.shuffleQueue(it, queueTitle = item.title, finite = true) } },
                     onShare = { share(ShareUrls.album(item.id), shareAlbumText) },
                     onPlayNext = { queue(item, playNext = true) },
                     onAddToQueue = { queue(item, playNext = false) },
@@ -757,7 +726,7 @@ fun LibraryScreen(
                 isRefreshing = userRefreshing,
                 onRefresh = {
                     userRefreshing = true
-                    if (networkAvailable && !isLoadingNow) viewModel.refresh()
+                    if (!isLoadingNow) viewModel.refresh()
                 },
                 state = refreshState,
                 indicator = {

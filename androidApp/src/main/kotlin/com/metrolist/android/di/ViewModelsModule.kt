@@ -66,7 +66,7 @@ val viewModelsModule =
 
         viewModelOf(::AccountViewModel)
         viewModel { HistoryViewModel(get<PlayHistoryRepository>(), get<CoroutineScope>()) }
-        viewModelOf(::LibraryViewModel)
+        viewModel { LibraryViewModel(get(), get()) }
         viewModel {
             HomeViewModel(
                 database = get(),

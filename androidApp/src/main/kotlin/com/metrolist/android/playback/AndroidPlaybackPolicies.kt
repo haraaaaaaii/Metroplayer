@@ -677,6 +677,8 @@ internal val externalTransportPlayerCommandCodes =
         Player.COMMAND_SEEK_TO_PREVIOUS,
         Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
         Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+        Player.COMMAND_SET_REPEAT_MODE,
+        Player.COMMAND_SET_SHUFFLE_MODE,
         Player.COMMAND_SET_VOLUME,
         Player.COMMAND_SET_DEVICE_VOLUME_WITH_FLAGS,
         Player.COMMAND_ADJUST_DEVICE_VOLUME_WITH_FLAGS,

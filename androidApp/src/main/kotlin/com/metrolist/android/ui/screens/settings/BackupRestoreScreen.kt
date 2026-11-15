@@ -630,30 +630,10 @@ fun BackupRestoreScreen(onNavigateBack: () -> Unit) {
                 source = initialSource,
                 type = PlaylistImportPreparationType.IMPORT_DATA,
             ) { update ->
-                val ytId = PlaylistImportManager.parsePlaylistId(trimmed)
-                if (ytId != null && (trimmed.contains("youtube.com") || trimmed.contains("youtu.be"))) {
-                    update(ImportProgressState.FetchingMetadata(youtubeSource))
-                    val (title, songs, coverUrl) = playlistImportManager.loadYouTubePlaylist(trimmed).getOrThrow()
-                    ImportedPlaylistData(
-                        title = title,
-                        tracks =
-                            songs.map {
-                                PlaylistImportManager.CsvTrack(
-                                    it.title,
-                                    it.artists.joinToString { artist -> artist.name },
-                                    it.id,
-                                )
-                            },
-                        source = youtubeSource,
-                        sourceYouTubePlaylistId = PlaylistImportManager.parsePlaylistId(trimmed),
-                        coverUrl = coverUrl,
-                    )
-                } else {
-                    UnifiedPlaylistImporter
-                        .parseFromInput(trimmed) { loaded, total ->
-                            update(ImportProgressState.LoadingTracks(initialSource, loaded, total))
-                        }.getOrThrow()
-                }
+                UnifiedPlaylistImporter
+                    .parseFromInput(trimmed) { loaded, total ->
+                        update(ImportProgressState.LoadingTracks(initialSource, loaded, total))
+                    }.getOrThrow()
             },
         )
     }

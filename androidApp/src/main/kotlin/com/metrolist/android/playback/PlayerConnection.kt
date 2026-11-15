@@ -8,7 +8,10 @@ import android.os.Build
 import android.os.IBinder
 import android.widget.Toast
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.core.content.ContextCompat
 import androidx.media3.common.Player
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
 import com.metrolist.android.R
 import com.metrolist.android.deviceconnect.AndroidDeviceConnect
 import com.metrolist.android.deviceconnect.toDeviceConnectRepeatMode
@@ -189,6 +192,29 @@ class PlayerConnection(
     }
 
     private var musicService: MusicService? = null
+    private var mediaController: MediaController? = null
+    private var mediaControllerGeneration = 0L
+
+    private val mediaControllerListener =
+        object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                updatePlaybackState(playbackState)
+            }
+
+            override fun onPlayWhenReadyChanged(
+                playWhenReady: Boolean,
+                reason: Int,
+            ) {
+                if (!_castState.value.isConnected) wantsPlaybackMutableState.value = playWhenReady
+            }
+
+            override fun onEvents(
+                player: Player,
+                events: Player.Events,
+            ) {
+                publishMediaControllerState(player)
+            }
+        }
 
     private var queueUndo: QueueUndo? = null
     private var playlistRequestGeneration = 0L
@@ -222,6 +248,19 @@ class PlayerConnection(
                 Player.STATE_ENDED -> PlaybackState.ENDED
                 else -> PlaybackState.IDLE
             }
+    }
+
+    private fun publishMediaControllerState(player: Player) {
+        updatePlaybackState(player.playbackState)
+        if (_castState.value.isConnected) return
+        _isPlaying.value = player.isPlaying
+        wantsPlaybackMutableState.value = player.playWhenReady
+        _currentPosition.value = player.currentPosition.coerceAtLeast(0L)
+        _bufferedPosition.value = player.bufferedPosition.coerceAtLeast(0L)
+        _duration.value = player.duration.takeIf { it > 0L } ?: 0L
+        _shuffleModeEnabled.value = player.shuffleModeEnabled
+        _repeatMode.value = player.repeatMode
+        updateProgress()
     }
 
     private val _isConnected = MutableStateFlow(false)
@@ -413,6 +452,10 @@ class PlayerConnection(
         connectionJob?.cancel()
         observationScope?.cancel()
         observationScope = null
+        mediaControllerGeneration++
+        mediaController?.removeListener(mediaControllerListener)
+        mediaController?.release()
+        mediaController = null
         musicService?.player?.removePlayerListener(readinessListener)
         musicService = null
         pendingCommands.disconnected()
@@ -440,6 +483,7 @@ class PlayerConnection(
                         musicService = s
                         observationScope = CoroutineScope(scope.coroutineContext + Job(scope.coroutineContext[Job]))
                         observeService(s)
+                        connectMediaController(s)
                         _isConnected.value = true
                         pendingCommands.connected()
                     }
@@ -459,6 +503,38 @@ class PlayerConnection(
                 bindingFailed()
             }
         }
+
+    private fun connectMediaController(service: MusicService) {
+        val generation = ++mediaControllerGeneration
+        mediaController?.removeListener(mediaControllerListener)
+        mediaController?.release()
+        mediaController = null
+        val future =
+            MediaController
+                .Builder(context, SessionToken(context, ComponentName(context, MusicService::class.java)))
+                .buildAsync()
+        future.addListener(
+            {
+                val controller =
+                    try {
+                        future.get()
+                    } catch (error: Exception) {
+                        if (generation == mediaControllerGeneration) {
+                            Timber.w(error, "Could not connect media controller")
+                        }
+                        return@addListener
+                    }
+                if (generation != mediaControllerGeneration || musicService !== service) {
+                    controller.release()
+                    return@addListener
+                }
+                mediaController = controller
+                controller.addListener(mediaControllerListener)
+                publishMediaControllerState(controller)
+            },
+            ContextCompat.getMainExecutor(context),
+        )
+    }
 
     init {
         scope.launch {
@@ -972,7 +1048,7 @@ class PlayerConnection(
         if (AndroidListenTogetherManager.isGuestPlaybackLocked) return
         val action =
             if (_castState.value.takeIf { it.isConnected }?.isPlaying
-                ?: (musicService?.player?.wantsPlayback == true)
+                ?: (mediaController?.playWhenReady ?: (musicService?.player?.wantsPlayback == true))
             ) {
                 DcPlaybackAction.PAUSE
             } else {
@@ -982,6 +1058,8 @@ class PlayerConnection(
         val service = musicService ?: return
         if (_castState.value.isConnected) {
             service.toggleCastPlayback()
+        } else if (mediaController != null) {
+            if (mediaController?.playWhenReady == true) mediaController?.pause() else mediaController?.play()
         } else if (service.player.wantsPlayback) {
             service.player.pause()
         } else if (service.player.retryPendingQueuePlayback()) {
@@ -1012,6 +1090,9 @@ class PlayerConnection(
         val service = musicService ?: return
         if (_castState.value.isConnected) {
             service.seekCastTo(position)
+        } else if (mediaController != null) {
+            service.updatePendingRestorePosition(position)
+            mediaController?.seekTo(position)
         } else {
             service.updatePendingRestorePosition(position)
             service.seekTo(position, source)
@@ -1066,15 +1147,21 @@ class PlayerConnection(
         if (deferUntilConnected { skipToNextInternal(local, expectedSongId) }) return
         val player = musicService?.player ?: return
         if (expectedSongId != null && player.currentSong.value?.id != expectedSongId) return
-        val resumePlayback = if (local && !_castState.value.isConnected) localSongChangeStartsPlayback() else player.wantsPlayback
-        if (musicService?.extendPlaylistBeforeSkip(resumePlayback) == true) return
-        val mode = _repeatMode.value
-        val index = player.currentMediaItemIndex.value
-        val lastIndex = player.songQueue.value.lastIndex
-        if (mode == Player.REPEAT_MODE_ALL && index == lastIndex && lastIndex >= 0) {
-            player.skipToQueueItem(0, resumePlayback = resumePlayback)
+        if (local && !_castState.value.isConnected && mediaController != null) {
+            val shouldResume = localSongChangeStartsPlayback()
+            mediaController?.seekToNext()
+            if (shouldResume) mediaController?.play() else mediaController?.pause()
         } else {
-            player.skipToNext(resumePlayback)
+            val resumePlayback = if (local) localSongChangeStartsPlayback() else player.wantsPlayback
+            if (musicService?.extendPlaylistBeforeSkip(resumePlayback) == true) return
+            val mode = _repeatMode.value
+            val index = player.currentMediaItemIndex.value
+            val lastIndex = player.songQueue.value.lastIndex
+            if (mode == Player.REPEAT_MODE_ALL && index == lastIndex && lastIndex >= 0) {
+                player.skipToQueueItem(0, resumePlayback = resumePlayback)
+            } else {
+                player.skipToNext(resumePlayback)
+            }
         }
     }
 
@@ -1087,7 +1174,13 @@ class PlayerConnection(
     private fun skipToPreviousInternal(local: Boolean = false) {
         if (deferUntilConnected { skipToPreviousInternal(local) }) return
         val player = musicService?.player ?: return
-        player.skipToPrevious(if (local && !_castState.value.isConnected) localSongChangeStartsPlayback() else player.wantsPlayback)
+        if (local && !_castState.value.isConnected && mediaController != null) {
+            val shouldResume = localSongChangeStartsPlayback()
+            mediaController?.seekToPrevious()
+            if (shouldResume) mediaController?.play() else mediaController?.pause()
+        } else {
+            player.skipToPrevious(if (local) localSongChangeStartsPlayback() else player.wantsPlayback)
+        }
     }
 
     fun skipToQueueItem(index: Int) {
@@ -1163,7 +1256,11 @@ class PlayerConnection(
         ) {
             return
         }
-        musicService?.media3Player?.repeatMode = mode
+        if (mediaController != null) {
+            mediaController?.repeatMode = mode
+        } else {
+            musicService?.media3Player?.repeatMode = mode
+        }
         _repeatMode.value = mode
     }
 
@@ -1187,7 +1284,11 @@ class PlayerConnection(
         _shuffleModeEnabled.value =
             if (service != null) {
                 val enabled = !service.player.isShuffleEnabled
-                service.media3Player?.shuffleModeEnabled = enabled
+                if (mediaController != null) {
+                    mediaController?.shuffleModeEnabled = enabled
+                } else {
+                    service.media3Player?.shuffleModeEnabled = enabled
+                }
                 enabled
             } else {
                 !_shuffleModeEnabled.value

@@ -30,7 +30,10 @@ fun Song.toSongItem(): SongItem {
         duration = song.duration.takeIf { it > 0 }?.toLong(),
         isExplicit = song.explicit,
         isUnavailable = song.isUnavailable,
-        endpointParams = song.id.takeIf { song.isLocal && it.startsWith("file:") },
+        endpointParams =
+            song.id.takeIf {
+                song.isLocal && (it.startsWith("file:") || it.startsWith("content:"))
+            },
         libraryAddToken = song.libraryAddToken,
         libraryRemoveToken = song.libraryRemoveToken,
         isUploaded = song.isUploaded,

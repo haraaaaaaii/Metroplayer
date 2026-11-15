@@ -41,6 +41,8 @@
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Required by the user-initiated updater in direct-distribution builds. -->
     <uses-permission
@@ -110,17 +112,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
             <intent-filter>
-                <action android:name="com.metrolist.music.action.SEARCH" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-
-            <intent-filter>
                 <action android:name="com.metrolist.music.action.LIBRARY" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-
-            <intent-filter>
-                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
 
@@ -137,12 +129,6 @@
                 <data android:host="metrolist.cc" />
                 <data android:pathPrefix="/listen" />
                 <data android:pathPrefix="/party" />
-                <data android:pathPrefix="/watch" />
-                <data android:pathPrefix="/playlist" />
-                <data android:pathPrefix="/channel/" />
-                <data android:pathPrefix="/browse/" />
-                <data android:pathPrefix="/album/" />
-                <data android:pathPrefix="/artist/" />
             </intent-filter>
 
             <intent-filter>
@@ -150,50 +136,6 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="metrolist" android:host="listen-together" />
-            </intent-filter>
-
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="http" />
-                <data android:scheme="https" />
-                <data android:host="youtube.com" />
-                <data android:host="m.youtube.com" />
-                <data android:host="www.youtube.com" />
-                <data android:host="music.youtube.com" />
-                <data android:pathPrefix="/v/" />
-                <data android:pathPrefix="/embed/" />
-                <data android:pathPrefix="/live/" />
-                <data android:pathPrefix="/watch" />
-                <data android:pathPrefix="/channel/" />
-                <data android:pathPrefix="/user/" />
-                <data android:pathPrefix="/c/" />
-                <data android:pathPrefix="/playlist" />
-                <data android:pathPrefix="/browse/" />
-                <data android:pathPrefix="/search" />
-            </intent-filter>
-
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="http" />
-                <data android:scheme="https" />
-                <data android:host="youtu.be" />
-                <data android:pathPrefix="/" />
-            </intent-filter>
-
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="vnd.youtube" />
-                <data android:scheme="vnd.youtube.launch" />
-                <data android:scheme="metrolist" />
             </intent-filter>
 
             <intent-filter>
@@ -443,11 +385,6 @@
         </activity-alias>
 
         <service
-            android:name="com.metrolist.shared.youtube.playback.PoTokenService"
-            android:exported="false"
-            android:process=":potoken" />
-
-        <service
             android:name="com.metrolist.android.playlistimport.AndroidPlaylistImportService"
             android:exported="false"
             android:foregroundServiceType="dataSync"
@@ -466,6 +403,7 @@
             android:foregroundServiceType="mediaPlayback"
             tools:ignore="ExportedService">
             <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
                 <action android:name="androidx.media3.session.MediaLibraryService" />
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>

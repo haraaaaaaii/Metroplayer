@@ -15,17 +15,13 @@ internal fun isTrustedLoginUrl(
     if (url.protocol.name != "https" || url.port != 443 || url.user != null || url.password != null) return false
     val provider = runCatching { Url(loginUrl).host.lowercase() }.getOrNull() ?: return false
     val host = url.host.lowercase()
-    val providerRoots = listOf("youtube.com", "spotify.com", "deezer.com", "tidal.com", "apple.com")
+    val providerRoots = listOf("spotify.com", "deezer.com", "tidal.com", "apple.com")
     val root =
         providerRoots.firstOrNull { provider == it || provider.endsWith(".$it") }
             ?: AmazonMusicPlaylistImporter.marketplaceHosts.firstOrNull { it == provider }?.removePrefix("music.")
             ?: return false
     if (host == root || host.endsWith(".$root")) return true
     return when (root) {
-        "youtube.com" -> {
-            host in setOf("accounts.google.com", "myaccount.google.com", "consent.google.com", "www.google.com")
-        }
-
         "spotify.com", "deezer.com", "tidal.com" -> {
             host in setOf("accounts.google.com", "appleid.apple.com", "account.apple.com", "www.facebook.com", "m.facebook.com")
         }

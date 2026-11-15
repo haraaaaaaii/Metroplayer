@@ -70,10 +70,16 @@ private data class QueuePeriodUid(
 private fun SongItem.toMediaItem(
     queueEntryKey: Long? = null,
     artworkUri: (String?) -> Uri? = { it?.let(::canonicalArtworkUrl)?.toUri() },
-): MediaItem =
-    MediaItem
-        .Builder()
-        .setMediaId(queueEntryKey?.takeIf { it >= 0 }?.let { AutomotiveMediaIds.queueSong(it, id) } ?: id)
+): MediaItem {
+    val localUri =
+        endpointParams?.takeIf { it.startsWith("content:") || it.startsWith("file:") }
+            ?: id.takeIf { it.startsWith("content:") || it.startsWith("file:") }
+    val builder =
+        MediaItem
+            .Builder()
+            .setMediaId(queueEntryKey?.takeIf { it >= 0 }?.let { AutomotiveMediaIds.queueSong(it, id) } ?: id)
+    localUri?.let { builder.setUri(it.toUri()) }
+    return builder
         .setMediaMetadata(
             MediaMetadata
                 .Builder()
@@ -83,6 +89,7 @@ private fun SongItem.toMediaItem(
                 .setArtworkUri(artworkUri(thumbnail))
                 .build(),
         ).build()
+}
 
 internal fun setMediaSessionRating(
     song: SongItem?,

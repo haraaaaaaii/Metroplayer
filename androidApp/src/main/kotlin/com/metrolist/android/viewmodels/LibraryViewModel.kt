@@ -2,6 +2,7 @@ package com.metrolist.android.viewmodels
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.metrolist.android.media.MediaStoreAudioLibrary
 import com.metrolist.shared.db.MusicDatabase
 import com.metrolist.shared.model.PlaylistItem
 import com.metrolist.shared.playlist.createStoredPlaylist
@@ -13,9 +14,10 @@ import kotlinx.coroutines.launch
 
 class LibraryViewModel(
     private val database: MusicDatabase,
+    private val mediaStoreAudioLibrary: MediaStoreAudioLibrary,
 ) : ViewModel() {
     private val sharedViewModel =
-        LibraryViewModel(viewModelScope, database)
+        LibraryViewModel(viewModelScope, database, localOnly = true)
     val uiState = sharedViewModel.uiState
     val presentation = sharedViewModel.presentation
     val contentMatchedSongs = sharedViewModel.contentMatchedSongs
@@ -29,7 +31,12 @@ class LibraryViewModel(
 
     fun setActive(active: Boolean) = sharedViewModel.setActive(active)
 
-    fun refresh(force: Boolean = true) = sharedViewModel.refresh(force)
+    fun refresh(force: Boolean = true) {
+        viewModelScope.launch {
+            if (mediaStoreAudioLibrary.hasReadPermission()) mediaStoreAudioLibrary.refresh()
+            sharedViewModel.refresh(force)
+        }
+    }
 
     fun refreshAfterHomeLoaded() = sharedViewModel.refreshAfterHomeLoaded()
 
