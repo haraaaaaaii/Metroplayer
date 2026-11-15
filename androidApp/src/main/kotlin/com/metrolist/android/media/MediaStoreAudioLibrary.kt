@@ -72,7 +72,7 @@ internal class MediaStoreAudioLibrary(
                 .associate { it }
 
         database.withDatabaseTransaction {
-            staleIds.chunked(900).forEach(dao::deleteMediaStoreSongs)
+            staleIds.chunked(900).forEach { dao.deleteMediaStoreSongs(it) }
             ids.chunked(900).forEach { chunk ->
                 dao.deleteSongArtistMappings(chunk)
                 dao.deleteSongAlbumMappings(chunk)

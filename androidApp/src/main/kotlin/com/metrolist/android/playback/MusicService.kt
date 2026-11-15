@@ -89,6 +89,7 @@ import com.metrolist.shared.discord.PresenceStatus
 import com.metrolist.shared.discord.discordPlaybackTimestamps
 import com.metrolist.shared.discord.resolveDiscordButtonLabel
 import com.metrolist.shared.generated.resources.Res
+import com.metrolist.shared.generated.resources.error_unknown
 import com.metrolist.shared.generated.resources.playback_unable_to_play_queued_track
 import com.metrolist.shared.generated.resources.search_no_results
 import com.metrolist.shared.model.MUSIC_VIDEO_TYPE_LIVE

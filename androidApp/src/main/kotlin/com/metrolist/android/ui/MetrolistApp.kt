@@ -1712,8 +1712,8 @@ fun MetrolistApp(
                                         }
                                     }
                                 },
-                                onNavigateToAlbum = playLocalAlbum,
-                                onNavigateToArtist = playLocalArtist,
+                                onNavigateToAlbum = ::playLocalAlbum,
+                                onNavigateToArtist = ::playLocalArtist,
                                 onNavigateToListenTogether = {
                                     playerBottomSheetState.collapseSoft()
                                     navigator.navigate(Screen.ListenTogether)
@@ -1886,8 +1886,8 @@ private fun ListenTogetherPlaybackRequestHandler(playerConnection: PlayerConnect
 
 @Composable
 private fun TopBarProfileAvatar(
-    accountName: String,
-    accountThumbnail: String,
+    accountName: String?,
+    accountThumbnail: String?,
     hasPendingUpdate: Boolean,
 ) {
     Box(modifier = Modifier.size(30.dp)) {
@@ -1900,7 +1900,7 @@ private fun TopBarProfileAvatar(
                     .background(MaterialTheme.colorScheme.surfaceContainer),
             contentAlignment = Alignment.Center,
         ) {
-            if (accountName.isNotEmpty() && accountThumbnail.isNotEmpty()) {
+            if (!accountName.isNullOrEmpty() && !accountThumbnail.isNullOrEmpty()) {
                 val context = LocalContext.current
                 val startupPresentation = LocalStartupPresentation.current
                 var avatarReady by remember(accountThumbnail) { mutableStateOf(false) }

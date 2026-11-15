@@ -12,7 +12,7 @@ import com.metrolist.shared.state.GlobalYouTubeRepository
 import com.metrolist.shared.viewmodels.LibraryViewModel
 import kotlinx.coroutines.launch
 
-class LibraryViewModel(
+class LibraryViewModel internal constructor(
     private val database: MusicDatabase,
     private val mediaStoreAudioLibrary: MediaStoreAudioLibrary,
 ) : ViewModel() {
